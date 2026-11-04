@@ -1,6 +1,6 @@
 {
   "name": "wikiblatt",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Wiki-style sidebar, section rail and scroll buttons for Obsidian",
   "main": "main.js",
   "scripts": {

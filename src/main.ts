@@ -6,7 +6,7 @@ import {
 	MarkdownView,
 	Plugin,
 	PluginSettingTab,
-	Setting,
+	SettingDefinitionItem,
 	TFile,
 	WorkspaceLeaf,
 	debounce,
@@ -244,7 +244,7 @@ class WikiSidebarView extends ItemView {
 		});
 		a.addEventListener("click", (evt) => {
 			evt.preventDefault();
-			this.app.workspace.openLinkText(file.path, "", Keymap.isModEvent(evt));
+			void this.app.workspace.openLinkText(file.path, "", Keymap.isModEvent(evt));
 		});
 		a.addEventListener("mouseover", (evt) => {
 			this.app.workspace.trigger("hover-link", {
@@ -516,7 +516,7 @@ export default class ArborWiki extends Plugin {
 			link.addEventListener("click", (evt) => {
 				evt.preventDefault();
 				evt.stopPropagation();
-				this.editAt(link, info.lineStart);
+				void this.editAt(link, info.lineStart);
 			});
 		});
 
@@ -650,7 +650,8 @@ export default class ArborWiki extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) as Partial<WikiSettings> | null;
+		this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
 		labelLanguage = this.settings.language;
 	}
 
@@ -664,134 +665,92 @@ export default class ArborWiki extends Plugin {
 
 /* ---------- Settings ---------- */
 
+type SettingKey = keyof WikiSettings;
+
+/** Declarative settings (Obsidian 1.13+), so they also show up in Obsidian's settings search. */
 class WikiSettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: ArborWiki) {
 		super(app, plugin);
 	}
 
-	display() {
-		const { containerEl } = this;
-		containerEl.empty();
-		const s = this.plugin.settings;
-		const save = () => this.plugin.saveSettings();
+	getSettingDefinitions(): SettingDefinitionItem<SettingKey>[] {
+		return [
+			{
+				name: "Label language",
+				desc: "Language for card titles, times and buttons. Auto follows the app language.",
+				control: { type: "dropdown", key: "language", options: { auto: "Auto", ko: "한국어", en: "English" } },
+			},
+			{
+				type: "group",
+				heading: "Sidebar",
+				items: [
+					{
+						name: "Excluded folders",
+						desc: "Comma-separated folder paths to leave out, e.g. Templates, Attachments",
+						control: { type: "text", key: "excludedFolders", placeholder: "Templates, Attachments" },
+					},
+					{ name: "Show most linked notes", control: { type: "toggle", key: "showPopular" } },
+					{
+						name: "Number of most linked notes",
+						control: { type: "slider", key: "popularCount", min: 3, max: 30, step: 1 },
+					},
+					{ name: "Show recent changes", control: { type: "toggle", key: "showRecent" } },
+					{
+						name: "Number of recent changes",
+						control: { type: "slider", key: "recentCount", min: 3, max: 30, step: 1 },
+					},
+					{
+						name: "Fit lists to panel height",
+						desc: "Show only as many rows as fit; the numbers above become maximums.",
+						control: { type: "toggle", key: "fitToHeight" },
+					},
+					{
+						name: "Open on startup",
+						desc: "Add the sidebar to the right side when Obsidian starts, if it is not already open.",
+						control: { type: "toggle", key: "openOnStartup" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Editor",
+				items: [
+					{
+						name: "Section rail",
+						desc: "Dots on the right edge of each note. Hover to see numbered headings; click to jump.",
+						control: { type: "toggle", key: "showRail" },
+					},
+					{
+						name: "Numbering starts at",
+						desc: "Auto follows the Wikibaum theme's \"Start numbering at H2\" switch.",
+						control: { type: "dropdown", key: "numberingStart", options: { auto: "Auto", "1": "H1", "2": "H2" } },
+					},
+					{
+						name: "Minimum dot spacing",
+						desc: "Pixels between neighbouring dots.",
+						control: { type: "slider", key: "railMinGap", min: 20, max: 40, step: 1 },
+					},
+					{
+						name: "Edit links on headings",
+						desc: "Show [편집] at the right end of each heading in Reading view. Reopen notes to apply.",
+						control: { type: "toggle", key: "showEditLinks" },
+					},
+					{
+						name: "Floating buttons",
+						desc: "Contents, scroll to top, scroll to bottom.",
+						control: { type: "toggle", key: "showButtons" },
+					},
+				],
+			},
+		];
+	}
 
-		new Setting(containerEl)
-			.setName("Label language")
-			.setDesc("Language for card titles, times and buttons. Auto follows the app language.")
-			.addDropdown((d) =>
-				d
-					.addOptions({ auto: "Auto", ko: "한국어", en: "English" })
-					.setValue(s.language)
-					.onChange(async (v) => {
-						s.language = v as LabelLanguage;
-						await save();
-					}),
-			);
+	getControlValue(key: string): unknown {
+		return this.plugin.settings[key as SettingKey];
+	}
 
-		new Setting(containerEl).setName("Sidebar").setHeading();
-
-		new Setting(containerEl)
-			.setName("Excluded folders")
-			.setDesc("Comma-separated folder paths to leave out, e.g. Templates, Attachments")
-			.addText((t) =>
-				t.setValue(s.excludedFolders).onChange(async (v) => {
-					s.excludedFolders = v;
-					await save();
-				}),
-			);
-
-		new Setting(containerEl).setName("Show most linked notes").addToggle((t) =>
-			t.setValue(s.showPopular).onChange(async (v) => {
-				s.showPopular = v;
-				await save();
-			}),
-		);
-		new Setting(containerEl).setName("Number of most linked notes").addSlider((sl) =>
-			sl.setLimits(3, 30, 1).setValue(s.popularCount).setDynamicTooltip().onChange(async (v) => {
-				s.popularCount = v;
-				await save();
-			}),
-		);
-		new Setting(containerEl).setName("Show recent changes").addToggle((t) =>
-			t.setValue(s.showRecent).onChange(async (v) => {
-				s.showRecent = v;
-				await save();
-			}),
-		);
-		new Setting(containerEl).setName("Number of recent changes").addSlider((sl) =>
-			sl.setLimits(3, 30, 1).setValue(s.recentCount).setDynamicTooltip().onChange(async (v) => {
-				s.recentCount = v;
-				await save();
-			}),
-		);
-		new Setting(containerEl)
-			.setName("Fit lists to panel height")
-			.setDesc("Show only as many rows as fit; the numbers above become maximums.")
-			.addToggle((t) =>
-				t.setValue(s.fitToHeight).onChange(async (v) => {
-					s.fitToHeight = v;
-					await save();
-				}),
-			);
-		new Setting(containerEl)
-			.setName("Open on startup")
-			.setDesc("Add the sidebar to the right side when Obsidian starts, if it is not already open.")
-			.addToggle((t) =>
-				t.setValue(s.openOnStartup).onChange(async (v) => {
-					s.openOnStartup = v;
-					await save();
-				}),
-			);
-
-		new Setting(containerEl).setName("Editor").setHeading();
-
-		new Setting(containerEl)
-			.setName("Section rail")
-			.setDesc("Dots on the right edge of each note. Hover to see numbered headings; click to jump.")
-			.addToggle((t) =>
-				t.setValue(s.showRail).onChange(async (v) => {
-					s.showRail = v;
-					await save();
-				}),
-			);
-		new Setting(containerEl)
-			.setName("Numbering starts at")
-			.setDesc("Auto follows the Wikibaum theme's \"Start numbering at H2\" switch.")
-			.addDropdown((d) =>
-				d
-					.addOptions({ auto: "Auto", "1": "H1", "2": "H2" })
-					.setValue(s.numberingStart)
-					.onChange(async (v) => {
-						s.numberingStart = v as NumberingStart;
-						await save();
-					}),
-			);
-		new Setting(containerEl)
-			.setName("Minimum dot spacing")
-			.setDesc("Pixels between neighbouring dots.")
-			.addSlider((sl) =>
-				sl.setLimits(20, 40, 1).setValue(s.railMinGap).setDynamicTooltip().onChange(async (v) => {
-					s.railMinGap = v;
-					await save();
-				}),
-			);
-		new Setting(containerEl)
-			.setName("Edit links on headings")
-			.setDesc("Show [편집] at the right end of each heading in Reading view. Reopen notes to apply.")
-			.addToggle((t) =>
-				t.setValue(s.showEditLinks).onChange(async (v) => {
-					s.showEditLinks = v;
-					await save();
-				}),
-			);
-		new Setting(containerEl)
-			.setName("Floating buttons")
-			.setDesc("Contents, scroll to top, scroll to bottom.")
-			.addToggle((t) =>
-				t.setValue(s.showButtons).onChange(async (v) => {
-					s.showButtons = v;
-					await save();
-				}),
-			);
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		this.plugin.settings = { ...this.plugin.settings, [key]: value };
+		await this.plugin.saveSettings();
 	}
 }
