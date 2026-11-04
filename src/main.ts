@@ -102,7 +102,7 @@ interface NumberedHeading {
 }
 
 /**
- * Number headings the way the Arbor Wiki theme does.
+ * Number headings the way the Wikibaum theme does.
  * "auto" follows the theme's "Start numbering at H2" switch when it is on,
  * otherwise starts at H1 if the note has one, else at its highest heading level.
  */
@@ -470,7 +470,7 @@ export default class ArborWiki extends Plugin {
 		await this.loadSettings();
 
 		this.registerView(VIEW_TYPE, (leaf) => new WikiSidebarView(leaf, this));
-		this.registerHoverLinkSource(VIEW_TYPE, { display: "Arbor Wiki sidebar", defaultMod: true });
+		this.registerHoverLinkSource(VIEW_TYPE, { display: "Wikiblatt sidebar", defaultMod: true });
 
 		this.addCommand({
 			id: "open-sidebar",
@@ -755,7 +755,7 @@ class WikiSettingTab extends PluginSettingTab {
 			);
 		new Setting(containerEl)
 			.setName("Numbering starts at")
-			.setDesc("Auto follows the Arbor Wiki theme's \"Start numbering at H2\" switch.")
+			.setDesc("Auto follows the Wikibaum theme's \"Start numbering at H2\" switch.")
 			.addDropdown((d) =>
 				d
 					.addOptions({ auto: "Auto", "1": "H1", "2": "H2" })

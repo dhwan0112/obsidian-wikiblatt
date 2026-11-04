@@ -1,6 +1,6 @@
-# Arbor Wiki Companion
+# Wikiblatt
 
-Wiki-style utilities for Obsidian. Works with any theme; pairs with the Arbor Wiki theme, which supplies the exact colors.
+Wiki-style utilities for Obsidian. Works with any theme; pairs with the Wikibaum theme, which supplies the exact colors.
 
 - **Sidebar cards**: most linked notes (ranked by how many other notes link to them) and recent changes with relative times ("27초 전", "3분 전").
 - **Section rail**: a column of dots on the right edge of each note, placed by where each heading sits in the note. Hover to see numbered headings ("1.", "2.1."); click to jump.
@@ -10,7 +10,7 @@ Times and labels follow the app language (Korean or English).
 
 ## Settings
 
-Excluded folders, number of items, numbering start (Auto / H1 / H2), minimum dot spacing, and switches for each part. "Auto" follows the Arbor Wiki theme's "Start numbering at H2" option.
+Excluded folders, number of items, numbering start (Auto / H1 / H2), minimum dot spacing, and switches for each part. "Auto" follows the Wikibaum theme's "Start numbering at H2" option.
 
 ## Build
 
