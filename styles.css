@@ -302,7 +302,7 @@ body:not(.native-scrollbars) .aw-toc-panel::-webkit-scrollbar-thumb:hover {
 }
 
 /* "[편집]" at the right end of headings (Reading view) */
-.markdown-rendered :is(h1, h2, h3, h4, h5, h6):has(> .aw-edit-link) {
+.markdown-rendered .aw-has-edit-link {
   position: relative;
   padding-right: 4em;
 }

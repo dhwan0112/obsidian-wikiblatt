@@ -511,6 +511,7 @@ export default class ArborWiki extends Plugin {
 			if (!heading) return;
 			const info = ctx.getSectionInfo(el);
 			if (!info) return;
+			heading.addClass("aw-has-edit-link");
 			const link = heading.createSpan({ cls: "aw-edit-link", text: T.edit() });
 			link.addEventListener("click", (evt) => {
 				evt.preventDefault();
