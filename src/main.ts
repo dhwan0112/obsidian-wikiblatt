@@ -28,6 +28,7 @@ interface WikiSettings {
 	popularCount: number;
 	excludedFolders: string;
 	openOnStartup: boolean;
+	fitToHeight: boolean;
 	language: LabelLanguage;
 	// Editor utilities
 	showRail: boolean;
@@ -44,6 +45,7 @@ const DEFAULT_SETTINGS: WikiSettings = {
 	popularCount: 10,
 	excludedFolders: "",
 	openOnStartup: true,
+	fitToHeight: true,
 	language: "auto",
 	showRail: true,
 	showButtons: true,
@@ -152,7 +154,11 @@ export function layoutDots(fractions: number[], height: number, gap: number): nu
 
 /* ---------- Sidebar view ---------- */
 
+const MIN_VISIBLE_ITEMS = 3;
+
 class WikiSidebarView extends ItemView {
+	private resizeObserver: ResizeObserver | null = null;
+
 	constructor(leaf: WorkspaceLeaf, private plugin: ArborWiki) {
 		super(leaf);
 	}
@@ -169,6 +175,13 @@ class WikiSidebarView extends ItemView {
 
 	async onOpen() {
 		this.render();
+		this.resizeObserver = new ResizeObserver(() => this.fit());
+		this.resizeObserver.observe(this.contentEl);
+	}
+
+	async onClose() {
+		this.resizeObserver?.disconnect();
+		this.resizeObserver = null;
 	}
 
 	render() {
@@ -178,6 +191,31 @@ class WikiSidebarView extends ItemView {
 		const s = this.plugin.settings;
 		if (s.showPopular) this.renderPopular(root);
 		if (s.showRecent) this.renderRecent(root);
+		this.fit();
+	}
+
+	/**
+	 * Show as many rows as the pane can hold. The item counts in settings are maximums;
+	 * rows are hidden from the bottom of the longer list first, down to MIN_VISIBLE_ITEMS each.
+	 */
+	fit() {
+		const root = this.contentEl;
+		const lists = Array.from(root.querySelectorAll<HTMLElement>(".aw-card-list"));
+		const rows = lists.map((l) => Array.from(l.querySelectorAll<HTMLElement>(".aw-card-item")));
+		rows.flat().forEach((r) => r.show());
+		if (!this.plugin.settings.fitToHeight || root.clientHeight === 0) return;
+
+		const visible = rows.map((r) => r.length);
+		while (root.scrollHeight > root.clientHeight) {
+			let target = -1;
+			for (let i = 0; i < rows.length; i++) {
+				if (visible[i] <= MIN_VISIBLE_ITEMS) continue;
+				if (target === -1 || visible[i] > visible[target]) target = i;
+			}
+			if (target === -1) break;
+			visible[target]--;
+			rows[target][visible[target]].hide();
+		}
 	}
 
 	/** Update only the "N초 전" labels so hovering and clicking are not interrupted. */
@@ -685,6 +723,15 @@ class WikiSettingTab extends PluginSettingTab {
 				await save();
 			}),
 		);
+		new Setting(containerEl)
+			.setName("Fit lists to panel height")
+			.setDesc("Show only as many rows as fit; the numbers above become maximums.")
+			.addToggle((t) =>
+				t.setValue(s.fitToHeight).onChange(async (v) => {
+					s.fitToHeight = v;
+					await save();
+				}),
+			);
 		new Setting(containerEl)
 			.setName("Open on startup")
 			.setDesc("Add the sidebar to the right side when Obsidian starts, if it is not already open.")

@@ -1,6 +1,6 @@
 {
   "name": "arbor-wiki-companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Wiki-style sidebar, section rail and scroll buttons for Obsidian",
   "main": "main.js",
   "scripts": {

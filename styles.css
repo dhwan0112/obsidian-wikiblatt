@@ -7,6 +7,9 @@
 /* ---------- Sidebar cards ---------- */
 
 .aw-sidebar {
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -14,8 +17,7 @@
 }
 
 .aw-card {
-  /* Keep full height in short panes; .aw-sidebar scrolls instead */
-  flex: none;
+  flex: none; /* never squash a card; rows are hidden instead */
   position: relative;
   overflow: hidden;
   background-color: var(--aw-card-bg, var(--background-primary));
