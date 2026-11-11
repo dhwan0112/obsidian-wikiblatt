@@ -43,6 +43,23 @@
   .aw-card-progress { display: none; }
 }
 
+/* Cards are ordered by a variable so they can be rearranged by dragging their titles */
+.aw-sidebar .aw-card {
+  order: var(--aw-card-order, 0);
+}
+.aw-card-handle {
+  cursor: grab;
+}
+.aw-card.is-dragging {
+  opacity: 0.5;
+}
+.aw-card.is-drop-before {
+  box-shadow: 0 -3px 0 0 var(--link-color);
+}
+.aw-card.is-drop-after {
+  box-shadow: 0 3px 0 0 var(--link-color);
+}
+
 .aw-card-header {
   display: flex;
   align-items: center;
@@ -106,6 +123,146 @@
 .aw-card-empty {
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* ---------- File tags card ---------- */
+
+/* Wrappers around the tag card and the list cards; the cards stay flex items of the sidebar */
+.aw-sidebar-part {
+  display: contents;
+}
+
+.aw-tag-search {
+  display: flex;
+  margin-left: auto;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.aw-tag-search:hover {
+  color: var(--text-normal);
+}
+.aw-tag-search .svg-icon {
+  width: 16px;
+  height: 16px;
+}
+.aw-tag-file {
+  margin-bottom: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 700;
+}
+.aw-tag-row + .aw-tag-row {
+  margin-top: 10px;
+}
+.aw-tag-browser {
+  padding-top: 10px;
+  border-top: 1px solid var(--aw-card-border, var(--background-modifier-border));
+}
+.aw-tag-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.aw-tag-toggle {
+  cursor: pointer;
+}
+.aw-tag-toggle:hover {
+  color: var(--text-normal);
+}
+.aw-tag-toggle[aria-expanded="false"] {
+  margin-bottom: 0;
+}
+.aw-tag-fold {
+  display: flex;
+  flex: none;
+}
+.aw-tag-fold .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.aw-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.aw-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--aw-card-border, var(--background-modifier-border));
+  border-radius: 5px;
+  background-color: var(--aw-tag-bg, var(--background-secondary));
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 22px;
+}
+.aw-tag-chip.is-active {
+  border-color: var(--link-color);
+}
+.aw-tag-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--link-color);
+  cursor: pointer;
+}
+.aw-tag-name:hover {
+  text-decoration: underline;
+}
+.aw-tag-count {
+  color: var(--aw-card-meta, var(--text-muted));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.aw-tag-remove,
+.aw-tag-back {
+  display: flex;
+  flex: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.aw-tag-remove:hover,
+.aw-tag-back:hover {
+  color: var(--text-normal);
+}
+.aw-tag-remove .svg-icon,
+.aw-tag-back .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.aw-tag-chips .aw-tag-input {
+  flex: 1 1 5em;
+  min-width: 5em;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+.aw-tag-list {
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.aw-tag-list-item {
+  display: flex;
+  font-size: 14px;
+  line-height: 24px;
+}
+.aw-tag-list-item::before {
+  content: none;
 }
 
 /* ---------- Editor utilities ---------- */

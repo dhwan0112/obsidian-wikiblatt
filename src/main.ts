@@ -1,5 +1,6 @@
 import {
 	App,
+	Events,
 	HeadingCache,
 	ItemView,
 	Keymap,
@@ -16,9 +17,13 @@ import {
 
 const VIEW_TYPE = "arbor-wiki-sidebar";
 const TIME_TICK_MS = 5_000;
+const TAG_LIST_LIMIT = 200;
 
 type NumberingStart = "auto" | "1" | "2";
 type LabelLanguage = "auto" | "ko" | "en";
+type CardId = "tags" | "popular" | "recent";
+const CARD_IDS: CardId[] = ["tags", "popular", "recent"];
+const CARD_DRAG_TYPE = "application/x-wikiblatt-card";
 
 interface WikiSettings {
 	// Sidebar cards
@@ -29,6 +34,11 @@ interface WikiSettings {
 	excludedFolders: string;
 	openOnStartup: boolean;
 	fitToHeight: boolean;
+	showFileTags: boolean;
+	/** Top-to-bottom order of the sidebar cards; changed by dragging a card's title. */
+	cardOrder: CardId[];
+	/** Whether the list of every tag in the tag card is folded away. */
+	tagsCollapsed: boolean;
 	language: LabelLanguage;
 	// Editor utilities
 	showRail: boolean;
@@ -46,6 +56,9 @@ const DEFAULT_SETTINGS: WikiSettings = {
 	excludedFolders: "",
 	openOnStartup: true,
 	fitToHeight: true,
+	showFileTags: true,
+	cardOrder: CARD_IDS,
+	tagsCollapsed: true,
 	language: "auto",
 	showRail: true,
 	showButtons: true,
@@ -70,6 +83,20 @@ const T = {
 	top: () => (isKorean() ? "맨 위로" : "Scroll to top"),
 	bottom: () => (isKorean() ? "맨 아래로" : "Scroll to bottom"),
 	edit: () => (isKorean() ? "[편집]" : "[edit]"),
+	fileTags: () => (isKorean() ? "파일 태그" : "File tags"),
+	tagsThisFile: () => (isKorean() ? "이 파일" : "This file"),
+	tagsFolder: () => (isKorean() ? "폴더" : "Folder"),
+	tagsInherited: () => (isKorean() ? "상위 폴더" : "Inherited"),
+	tagsAll: () => (isKorean() ? "전체 태그" : "All tags"),
+	tagAdd: () => (isKorean() ? "태그 추가" : "Add tag"),
+	tagRemove: (tag: string) => (isKorean() ? `${tag} 제거` : `Remove ${tag}`),
+	tagBack: () => (isKorean() ? "전체 태그로" : "Back to all tags"),
+	tagNoFile: () => (isKorean() ? "열린 파일이 없습니다." : "No file is open."),
+	tagNone: () => (isKorean() ? "아직 태그가 없습니다." : "No tags yet."),
+	dragToReorder: () => (isKorean() ? "끌어서 순서 바꾸기" : "Drag to reorder"),
+	tagSearch: () => (isKorean() ? "태그로 찾기" : "Search by tag"),
+	tagMore: (n: number) => (isKorean() ? `외 ${n}개` : `${n} more`),
+	vaultRoot: () => (isKorean() ? "보관함 루트" : "Vault root"),
 };
 
 /** Wiki-style relative time: "방금 전", "27초 전", "3분 전", "2시간 전", "5일 전". */
@@ -152,12 +179,67 @@ export function layoutDots(fractions: number[], height: number, gap: number): nu
 	return y;
 }
 
+/* ---------- File tags, provided by the Wikiwurzel plugin ---------- */
+
+/*
+ * Wikiwurzel keeps the tags (hidden ".tag" files) and hands out this API through
+ * workspace events; Wikiblatt only draws the card. See Wikiwurzel's src/api.ts.
+ */
+const WURZEL_API_VERSION = 1;
+const WURZEL_REQUEST = "wikiwurzel:request";
+const WURZEL_READY = "wikiwurzel:ready";
+const WURZEL_CHANGED = "wikiwurzel:changed";
+const WURZEL_UNLOAD = "wikiwurzel:unload";
+
+interface WurzelApi {
+	version: number;
+	ownTags(path: string): string[];
+	folderTags(folder: string): string[];
+	inheritedTags(folder: string): { tag: string; from: string }[];
+	allTagsOf(path: string): string[];
+	index(): Map<string, string[]>;
+	setOwn(path: string, tags: string[]): Promise<void>;
+	setFolder(folder: string, tags: string[]): Promise<void>;
+	openSearch(query?: string): void;
+	openEditor(path: string): void;
+}
+
+function isWurzelApi(value: unknown): value is WurzelApi {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { version?: unknown }).version === WURZEL_API_VERSION &&
+		typeof (value as { index?: unknown }).index === "function"
+	);
+}
+
+function cleanTag(raw: string): string {
+	return raw.trim().replace(/^#+/, "").replace(/\s+/g, "-");
+}
+
+function folderOf(path: string): string {
+	const i = path.lastIndexOf("/");
+	return i === -1 ? "" : path.slice(0, i);
+}
+
+function nameOf(path: string): string {
+	return path.slice(path.lastIndexOf("/") + 1);
+}
+
 /* ---------- Sidebar view ---------- */
 
 const MIN_VISIBLE_ITEMS = 3;
 
 class WikiSidebarView extends ItemView {
 	private resizeObserver: ResizeObserver | null = null;
+	private tagsEl!: HTMLElement;
+	private listsEl!: HTMLElement;
+	/** Tag whose files are listed in the tag card; null shows every tag. */
+	private browsedTag: string | null = null;
+	/** Row whose input gets the focus back after the card is redrawn. */
+	private refocus: "file" | "folder" | null = null;
+	/** Card being dragged by its title, if any. */
+	private dragged: CardId | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: ArborWiki) {
 		super(leaf);
@@ -174,7 +256,13 @@ class WikiSidebarView extends ItemView {
 	}
 
 	async onOpen() {
+		const root = this.contentEl;
+		root.empty();
+		root.addClass("aw-sidebar");
+		this.tagsEl = root.createDiv({ cls: "aw-sidebar-part" });
+		this.listsEl = root.createDiv({ cls: "aw-sidebar-part" });
 		this.render();
+		this.renderTags();
 		this.resizeObserver = new ResizeObserver(() => this.fit());
 		this.resizeObserver.observe(this.contentEl);
 	}
@@ -185,9 +273,8 @@ class WikiSidebarView extends ItemView {
 	}
 
 	render() {
-		const root = this.contentEl;
+		const root = this.listsEl;
 		root.empty();
-		root.addClass("aw-sidebar");
 		const s = this.plugin.settings;
 		if (s.showPopular) this.renderPopular(root);
 		if (s.showRecent) this.renderRecent(root);
@@ -227,19 +314,68 @@ class WikiSidebarView extends ItemView {
 		});
 	}
 
-	private card(parent: HTMLElement, icon: string, title: string, progress = false) {
+	private card(parent: HTMLElement, id: CardId, icon: string, title: string, progress = false) {
 		const card = parent.createDiv({ cls: "aw-card" });
 		if (progress) card.createDiv({ cls: "aw-card-progress" });
 		const header = card.createDiv({ cls: "aw-card-header" });
 		setIcon(header.createSpan({ cls: "aw-card-icon" }), icon);
 		header.createSpan({ cls: "aw-card-title", text: title });
+		this.setupCard(card, header, id);
 		return card.createEl("ul", { cls: "aw-card-list" });
 	}
 
-	private link(parent: HTMLElement, file: TFile) {
+	/**
+	 * Put the card at its saved position and let it be dragged by its title onto another card.
+	 * The position is a CSS order, so the cards can live in separate containers.
+	 */
+	private setupCard(card: HTMLElement, header: HTMLElement, id: CardId) {
+		card.dataset.card = id;
+		card.setCssProps({ "--aw-card-order": String(this.plugin.settings.cardOrder.indexOf(id)) });
+		header.addClass("aw-card-handle");
+		header.setAttr("draggable", "true");
+		header.setAttr("aria-label", T.dragToReorder());
+
+		header.addEventListener("dragstart", (evt) => {
+			this.dragged = id;
+			card.addClass("is-dragging");
+			// A private type, so dropping on a note by accident inserts nothing.
+			evt.dataTransfer?.setData(CARD_DRAG_TYPE, id);
+			if (evt.dataTransfer) evt.dataTransfer.effectAllowed = "move";
+		});
+		header.addEventListener("dragend", () => {
+			this.dragged = null;
+			card.removeClass("is-dragging");
+			this.clearDropMarks();
+		});
+		card.addEventListener("dragover", (evt) => {
+			if (!this.dragged || this.dragged === id) return;
+			evt.preventDefault();
+			const rect = card.getBoundingClientRect();
+			const after = evt.clientY > rect.top + rect.height / 2;
+			this.clearDropMarks();
+			card.addClass(after ? "is-drop-after" : "is-drop-before");
+		});
+		card.addEventListener("drop", (evt) => {
+			const moved = this.dragged;
+			if (!moved || moved === id) return;
+			evt.preventDefault();
+			const after = card.hasClass("is-drop-after");
+			this.dragged = null;
+			this.clearDropMarks();
+			void this.plugin.moveCard(moved, id, after);
+		});
+	}
+
+	private clearDropMarks() {
+		this.contentEl.querySelectorAll(".is-drop-before, .is-drop-after").forEach((el) => {
+			el.removeClass("is-drop-before", "is-drop-after");
+		});
+	}
+
+	private link(parent: HTMLElement, file: TFile, text = file.basename) {
 		const a = parent.createEl("a", {
 			cls: "aw-card-link",
-			text: file.basename,
+			text,
 			attr: { href: file.path },
 		});
 		a.addEventListener("click", (evt) => {
@@ -258,8 +394,168 @@ class WikiSidebarView extends ItemView {
 		return a;
 	}
 
+	/* ----- File tags card ----- */
+
+	/** Draw the tag card for the file being viewed. Kept apart from render() so typing is not interrupted. */
+	renderTags() {
+		const host = this.tagsEl;
+		host.empty();
+		const store = this.plugin.wurzel;
+		if (!this.plugin.settings.showFileTags || !store) {
+			this.fit();
+			return;
+		}
+		const card = host.createDiv({ cls: "aw-card aw-tag-card" });
+		const header = card.createDiv({ cls: "aw-card-header" });
+		setIcon(header.createSpan({ cls: "aw-card-icon" }), "tags");
+		header.createSpan({ cls: "aw-card-title", text: T.fileTags() });
+		const search = header.createSpan({ cls: "aw-tag-search", attr: { "aria-label": T.tagSearch(), role: "button" } });
+		setIcon(search, "search");
+		search.setAttr("draggable", "false");
+		search.addEventListener("click", () => store.openSearch(this.browsedTag ? `#${this.browsedTag} ` : ""));
+		this.setupCard(card, header, "tags");
+
+		const known = card.createEl("datalist", { attr: { id: "aw-tag-options" } });
+		for (const tag of [...store.index().keys()].sort((a, b) => a.localeCompare(b))) {
+			known.createEl("option", { attr: { value: tag } });
+		}
+
+		const file = this.app.workspace.getActiveFile();
+		if (file) {
+			card.createDiv({ cls: "aw-tag-file", text: file.name });
+			const folder = folderOf(file.path);
+			this.tagRow(card, "file", T.tagsThisFile(), store.ownTags(file.path), (tags) =>
+				store.setOwn(file.path, tags),
+			);
+			this.tagRow(
+				card,
+				"folder",
+				`${T.tagsFolder()}: ${folder ? nameOf(folder) : T.vaultRoot()}`,
+				store.folderTags(folder),
+				(tags) => store.setFolder(folder, tags),
+			);
+			const inherited = store.inheritedTags(folder);
+			if (inherited.length > 0) {
+				const row = card.createDiv({ cls: "aw-tag-row" });
+				row.createDiv({ cls: "aw-tag-label", text: T.tagsInherited() });
+				const chips = row.createDiv({ cls: "aw-tag-chips" });
+				for (const { tag, from } of inherited) {
+					this.chip(chips, tag).setAttr("aria-label", from || T.vaultRoot());
+				}
+			}
+		} else {
+			card.createDiv({ cls: "aw-card-empty", text: T.tagNoFile() });
+		}
+		this.refocus = null;
+
+		this.renderTagBrowser(card);
+		this.fit();
+	}
+
+	private chip(parent: HTMLElement, tag: string, count?: number) {
+		const chip = parent.createSpan({ cls: "aw-tag-chip" + (tag === this.browsedTag ? " is-active" : "") });
+		const name = chip.createSpan({ cls: "aw-tag-name", text: tag });
+		if (count !== undefined) chip.createSpan({ cls: "aw-tag-count", text: String(count) });
+		name.addEventListener("click", () => {
+			this.browsedTag = this.browsedTag === tag ? null : tag;
+			this.renderTags();
+		});
+		return chip;
+	}
+
+	/** A labelled row of removable tags with an input for adding one. */
+	private tagRow(
+		card: HTMLElement,
+		key: "file" | "folder",
+		label: string,
+		tags: string[],
+		save: (tags: string[]) => Promise<void>,
+	) {
+		const row = card.createDiv({ cls: "aw-tag-row" });
+		row.createDiv({ cls: "aw-tag-label", text: label });
+		const chips = row.createDiv({ cls: "aw-tag-chips" });
+		for (const tag of tags) {
+			const chip = this.chip(chips, tag);
+			const remove = chip.createSpan({ cls: "aw-tag-remove", attr: { "aria-label": T.tagRemove(tag), role: "button" } });
+			setIcon(remove, "x");
+			remove.addEventListener("click", () => void save(tags.filter((t) => t !== tag)));
+		}
+		const input = chips.createEl("input", {
+			cls: "aw-tag-input",
+			attr: { type: "text", placeholder: T.tagAdd(), list: "aw-tag-options", "aria-label": T.tagAdd() },
+		});
+		const add = () => {
+			const tag = cleanTag(input.value);
+			if (!tag) return;
+			input.value = "";
+			if (tags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
+			this.refocus = key;
+			void save([...tags, tag]);
+		};
+		input.addEventListener("keydown", (evt) => {
+			if (evt.key === "Enter" && !evt.isComposing) {
+				evt.preventDefault();
+				add();
+			}
+		});
+		// Picking a suggestion with the mouse fires "change" without Enter.
+		input.addEventListener("change", add);
+		if (this.refocus === key) input.focus();
+	}
+
+	/** Every tag with its file count, or the files of the tag that was clicked. */
+	private renderTagBrowser(card: HTMLElement) {
+		const store = this.plugin.wurzel;
+		if (!store) return;
+		const index = store.index();
+		if (this.browsedTag && !index.has(this.browsedTag)) this.browsedTag = null;
+		const row = card.createDiv({ cls: "aw-tag-row aw-tag-browser" });
+
+		if (!this.browsedTag) {
+			const collapsed = this.plugin.settings.tagsCollapsed;
+			const head = row.createDiv({
+				cls: "aw-tag-label aw-tag-toggle",
+				attr: { role: "button", "aria-expanded": String(!collapsed) },
+			});
+			setIcon(head.createSpan({ cls: "aw-tag-fold" }), collapsed ? "chevron-right" : "chevron-down");
+			head.createSpan({ text: `${T.tagsAll()} (${index.size})` });
+			head.addEventListener("click", () => void this.plugin.setTagsCollapsed(!collapsed));
+			if (collapsed) return;
+			if (index.size === 0) {
+				row.createDiv({ cls: "aw-card-empty", text: T.tagNone() });
+				return;
+			}
+			const chips = row.createDiv({ cls: "aw-tag-chips" });
+			const ranked = [...index].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+			for (const [tag, paths] of ranked) this.chip(chips, tag, paths.length);
+			return;
+		}
+
+		const paths = index.get(this.browsedTag) ?? [];
+		const head = row.createDiv({ cls: "aw-tag-label" });
+		const back = head.createSpan({ cls: "aw-tag-back", attr: { "aria-label": T.tagBack(), role: "button" } });
+		setIcon(back, "arrow-left");
+		back.addEventListener("click", () => {
+			this.browsedTag = null;
+			this.renderTags();
+		});
+		head.createSpan({ text: `${this.browsedTag} (${paths.length})` });
+
+		const list = row.createEl("ul", { cls: "aw-tag-list" });
+		const sorted = [...paths].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+		for (const path of sorted.slice(0, TAG_LIST_LIMIT)) {
+			const f = this.app.vault.getAbstractFileByPath(path);
+			if (!(f instanceof TFile)) continue;
+			const li = list.createEl("li", { cls: "aw-tag-list-item" });
+			this.link(li, f, f.extension === "md" ? f.basename : f.name).setAttr("title", f.path);
+		}
+		if (sorted.length > TAG_LIST_LIMIT) {
+			list.createEl("li", { cls: "aw-card-empty", text: T.tagMore(sorted.length - TAG_LIST_LIMIT) });
+		}
+	}
+
 	private renderRecent(root: HTMLElement) {
-		const list = this.card(root, "history", T.recent(), true);
+		const list = this.card(root, "recent", "history", T.recent(), true);
 		const files = this.plugin.recentFiles();
 		if (files.length === 0) {
 			list.createEl("li", { cls: "aw-card-empty", text: T.empty() });
@@ -276,7 +572,7 @@ class WikiSidebarView extends ItemView {
 	}
 
 	private renderPopular(root: HTMLElement) {
-		const list = this.card(root, "building-2", T.popular());
+		const list = this.card(root, "popular", "building-2", T.popular());
 		list.addClass("is-ranked");
 		const ranked = this.plugin.popularFiles();
 		if (ranked.length === 0) {
@@ -462,9 +758,13 @@ class EditorUtilities {
 export default class ArborWiki extends Plugin {
 	settings: WikiSettings = DEFAULT_SETTINGS;
 	private utilities = new Map<MarkdownView, EditorUtilities>();
+	/** Wikiwurzel's API while that plugin is on; the tag card is shown only then. */
+	wurzel: WurzelApi | null = null;
+	private tagsShownFor: string | null = null;
 
 	private refreshSidebar = debounce(() => this.renderSidebars(), 500, true);
 	private refreshEditors = debounce(() => this.syncEditors(), 200, true);
+	private refreshTags = debounce(() => this.sidebarViews().forEach((v) => v.renderTags()), 50, true);
 
 	async onload() {
 		await this.loadSettings();
@@ -485,6 +785,25 @@ export default class ArborWiki extends Plugin {
 		this.registerEvent(this.app.vault.on("rename", () => this.refreshSidebar()));
 		this.registerEvent(this.app.metadataCache.on("resolved", () => this.refreshSidebar()));
 		this.registerInterval(window.setInterval(() => this.tickSidebars(), TIME_TICK_MS));
+
+		// File tags: the card follows the file being viewed, whatever its type.
+		this.registerEvent(this.app.workspace.on("file-open", () => this.followActiveFile()));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.followActiveFile()));
+		// Wikiwurzel hands over its API when it is ready, and again whenever we ask.
+		const bus: Events = this.app.workspace;
+		this.registerEvent(
+			bus.on(WURZEL_READY, (api: unknown) => {
+				this.wurzel = isWurzelApi(api) ? api : null;
+				this.refreshTags();
+			}),
+		);
+		this.registerEvent(
+			bus.on(WURZEL_UNLOAD, () => {
+				this.wurzel = null;
+				this.refreshTags();
+			}),
+		);
+		this.registerEvent(bus.on(WURZEL_CHANGED, () => this.refreshTags()));
 
 		// Editor utilities
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.refreshEditors()));
@@ -534,6 +853,7 @@ export default class ArborWiki extends Plugin {
 
 		this.app.workspace.onLayoutReady(() => {
 			this.syncEditors();
+			bus.trigger(WURZEL_REQUEST);
 			// When the plugin is re-enabled or updated, Obsidian restores the old
 			// sidebar leaf only after onload finishes. Checking right away would
 			// miss it and add a second sidebar, so wait one task.
@@ -544,6 +864,17 @@ export default class ArborWiki extends Plugin {
 	onunload() {
 		this.utilities.forEach((u) => u.destroy());
 		this.utilities.clear();
+	}
+
+	/**
+	 * Redraw the tag card only when a different file comes into view. Clicking into
+	 * the sidebar also changes the active leaf, and must not reset what is being typed.
+	 */
+	private followActiveFile() {
+		const path = this.app.workspace.getActiveFile()?.path ?? null;
+		if (path === this.tagsShownFor) return;
+		this.tagsShownFor = path;
+		this.refreshTags();
 	}
 
 	/** Attach utilities to every open Markdown view and drop those that closed. */
@@ -652,13 +983,34 @@ export default class ArborWiki extends Plugin {
 	async loadSettings() {
 		const data = (await this.loadData()) as Partial<WikiSettings> | null;
 		this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
+		// Keep only known cards, each once, and add any card missing from older settings.
+		const saved: unknown = this.settings.cardOrder;
+		const known = Array.isArray(saved) ? CARD_IDS.filter((id) => saved.includes(id)) : [];
+		known.sort((a, b) => (saved as unknown[]).indexOf(a) - (saved as unknown[]).indexOf(b));
+		this.settings.cardOrder = [...known, ...CARD_IDS.filter((id) => !known.includes(id))];
 		labelLanguage = this.settings.language;
+	}
+
+	/** Move one sidebar card to just before or after another and remember the order. */
+	async moveCard(moved: CardId, target: CardId, after: boolean) {
+		const order = this.settings.cardOrder.filter((id) => id !== moved);
+		order.splice(order.indexOf(target) + (after ? 1 : 0), 0, moved);
+		this.settings = { ...this.settings, cardOrder: order };
+		await this.saveSettings();
+	}
+
+	/** Fold or unfold the list of every tag; only the tag card needs redrawing. */
+	async setTagsCollapsed(collapsed: boolean) {
+		this.settings = { ...this.settings, tagsCollapsed: collapsed };
+		await this.saveData(this.settings);
+		this.refreshTags();
 	}
 
 	async saveSettings() {
 		labelLanguage = this.settings.language;
 		await this.saveData(this.settings);
 		this.renderSidebars();
+		this.refreshTags();
 		this.utilities.forEach((u) => u.update());
 	}
 }
@@ -688,6 +1040,11 @@ class WikiSettingTab extends PluginSettingTab {
 						name: "Excluded folders",
 						desc: "Comma-separated folder paths to leave out, e.g. Templates, Attachments",
 						control: { type: "text", key: "excludedFolders", placeholder: "Templates, Attachments" },
+					},
+					{
+						name: "File tags",
+						desc: "Show and edit tags for the file being viewed, including PDFs and other attachments. Needs the Wikiwurzel plugin, which stores the tags; without it the card stays hidden.",
+						control: { type: "toggle", key: "showFileTags" },
 					},
 					{ name: "Show most linked notes", control: { type: "toggle", key: "showPopular" } },
 					{
