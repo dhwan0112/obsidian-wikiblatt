@@ -1,10 +1,10 @@
 {
   "id": "wikiblatt",
   "name": "Wikiblatt",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "minAppVersion": "1.13.0",
   "description": "Wiki-style side panels (recent changes, most linked notes), a numbered section rail and scroll buttons.",
-  "author": "Kim Donghwan",
+  "author": "Denny Kim",
   "isDesktopOnly": false,
   "authorUrl": "https://github.com/dhwan0112"
 }
