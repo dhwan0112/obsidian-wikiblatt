@@ -656,7 +656,7 @@ class EditorUtilities {
 		return numberHeadings(
 			cache?.headings ?? [],
 			this.plugin.settings.numberingStart,
-			document.body.classList.contains("aw-numbers-from-h2"),
+			this.view.containerEl.doc.body.classList.contains("aw-numbers-from-h2"),
 		);
 	}
 
@@ -820,7 +820,7 @@ export default class ArborWiki extends Plugin {
 		);
 		// Theme switches (Style Settings toggles body classes) change the numbering base.
 		const bodyObserver = new MutationObserver(() => this.utilities.forEach((u) => u.renderRail()));
-		bodyObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+		bodyObserver.observe(activeDocument.body, { attributes: true, attributeFilter: ["class"] });
 		this.register(() => bodyObserver.disconnect());
 
 		// "[편집]" links on headings in Reading view.
@@ -840,12 +840,12 @@ export default class ArborWiki extends Plugin {
 		});
 
 		// Close open contents panels on a click elsewhere or on Escape.
-		this.registerDomEvent(document, "pointerdown", (evt) => {
+		this.registerDomEvent(activeDocument, "pointerdown", (evt) => {
 			this.utilities.forEach((u) => {
 				if (u.isTocOpen() && !u.containsTarget(evt.target)) u.toggleToc(false);
 			});
 		});
-		this.registerDomEvent(document, "keydown", (evt) => {
+		this.registerDomEvent(activeDocument, "keydown", (evt) => {
 			if (evt.key === "Escape") this.utilities.forEach((u) => u.isTocOpen() && u.toggleToc(false));
 		});
 
